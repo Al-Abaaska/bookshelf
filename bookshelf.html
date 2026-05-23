@@ -1055,7 +1055,6 @@ var favsLoaded = false;
 function getFavs() { return favsCache; }
 function saveFavs(arr) {
   favsCache = arr;
-  localStorage.setItem('bs-favs', JSON.stringify(arr));
 }
 function firestoreSet(arr) {
   db.collection('favorites').doc('all').set({ items: arr }, { merge: true }).catch(function(err) {
@@ -1111,16 +1110,24 @@ function toggleFavPanel() {
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+var favShowAll = false;
+function toggleFavFilter() {
+  favShowAll = !favShowAll;
+  renderFavs();
+}
 function renderFavs() {
   var list = document.getElementById('fav-list');
   var count = document.getElementById('fav-count');
-  var arr = getFavs();
-  count.textContent = arr.length ? '(' + arr.length + ')' : '';
+  var all = getFavs();
+  var arr = favShowAll || !curBook ? all : all.filter(function(f) { return f.bookId === curBook; });
+  count.textContent = all.length ? '(' + all.length + ')' : '';
   if (!arr.length) {
-    list.innerHTML = '<div id="fav-empty"><span class="fav-empty-icon">☆</span>No favorites yet.<br>Select text in the reader and add it here.</div>';
+    var msg = favShowAll ? 'No favorites yet.' : 'No favorites for this book.';
+    list.innerHTML = '<div id="fav-empty"><span class="fav-empty-icon">☆</span>' + msg + '<br>Select text in the reader and add it here.</div>';
     return;
   }
-  var html = '';
+  var html = '<div style="padding:4px 0 10px;font-size:12px;color:rgba(255,255,255,0.2)">' +
+    '<label style="cursor:pointer"><input type="checkbox" ' + (favShowAll ? 'checked' : '') + ' onchange="toggleFavFilter()" style="margin-right:4px"> Show all books</label></div>';
   arr.forEach(function(f) {
     var note = f.note || '';
     html += '<div class="fav-item" data-id="' + f.id + '">' +
@@ -2200,22 +2207,13 @@ function loadImportedBooks() {
 function loadFavsFromFirestore() {
   db.collection('favorites').doc('all').get().then(function(doc) {
     if (doc.exists && doc.data().items) {
-      var remote = doc.data().items;
-      var local = [];
-      try { local = JSON.parse(localStorage.getItem('bs-favs') || '[]'); } catch(e) {}
-      // merge: remote wins, keep local that aren't in remote
-      var remoteIds = {};
-      remote.forEach(function(f) { remoteIds[f.id] = true; });
-      var merged = remote.slice();
-      local.forEach(function(f) { if (!remoteIds[f.id]) merged.push(f); });
-      saveFavs(merged);
-      renderFavs();
+      saveFavs(doc.data().items);
     }
     favsLoaded = true;
+    renderFavs();
   }).catch(function(err) {
-    console.warn('Firestore read failed, using local cache:', err);
+    console.warn('Firestore read failed:', err);
     favsLoaded = true;
-    try { saveFavs(JSON.parse(localStorage.getItem('bs-favs') || '[]')); } catch(e) {}
   });
 }
 
