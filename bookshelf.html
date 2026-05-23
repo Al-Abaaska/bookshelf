@@ -787,6 +787,21 @@ body.theme-forest #sidebar { background: rgba(4,10,4,0.85); }
 </div>
 
 <input type="file" id="file-input" accept=".txt,.docx,.doc" style="display:none">
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script>
+/* ── firebase init ── */
+var firebaseConfig = {
+  apiKey: "AIzaSyDtjXK2-3zH_bfKmeZfu1QlQK9ZvvAfYhU",
+  authDomain: "bookshelf-798ec.firebaseapp.com",
+  projectId: "bookshelf-798ec",
+  storageBucket: "bookshelf-798ec.firebasestorage.app",
+  messagingSenderId: "616874800204",
+  appId: "1:616874800204:web:4c2d1b31f44b34fd9b30e9"
+};
+firebase.initializeApp(firebaseConfig);
+var db = firebase.firestore();
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 
 <!-- ── DETAIL VIEW ── -->
@@ -1034,13 +1049,18 @@ function setTheme(t) {
   if (saved) setTheme(saved);
 })();
 
-/* ── favorites ── */
-function getFavs() {
-  try { return JSON.parse(localStorage.getItem('bs-favs') || '[]'); }
-  catch(e) { return []; }
-}
+/* ── favorites (Firestore + localStorage cache) ── */
+var favsCache = [];
+var favsLoaded = false;
+function getFavs() { return favsCache; }
 function saveFavs(arr) {
+  favsCache = arr;
   localStorage.setItem('bs-favs', JSON.stringify(arr));
+}
+function firestoreSet(arr) {
+  db.collection('favorites').doc('all').set({ items: arr }, { merge: true }).catch(function(err) {
+    console.warn('Firestore write failed, using local only:', err);
+  });
 }
 function addFav(text) {
   if (!text || !text.trim()) return;
@@ -1053,7 +1073,7 @@ function addFav(text) {
     if (book && book[chIdx]) chTitle = book[chIdx].title || '';
   } catch(e) {}
   var date = new Date();
-  arr.push({
+  var fav = {
     id: Date.now() + '_' + Math.random().toString(36).slice(2,6),
     bookId: curBook,
     bookTitle: meta ? meta.title : '',
@@ -1062,19 +1082,23 @@ function addFav(text) {
     text: text.trim(),
     note: '',
     ts: date.toISOString()
-  });
+  };
+  arr.push(fav);
   saveFavs(arr);
+  firestoreSet(arr);
   renderFavs();
 }
 function delFav(id) {
   var arr = getFavs().filter(function(f) { return f.id !== id; });
   saveFavs(arr);
+  firestoreSet(arr);
   renderFavs();
 }
 function updateFavNote(id, note) {
   var arr = getFavs();
   arr.forEach(function(f) { if (f.id === id) f.note = note; });
   saveFavs(arr);
+  firestoreSet(arr);
 }
 function navToFav(f) {
   openCh(f.bookId, f.chIdx);
@@ -1083,6 +1107,9 @@ function toggleFavPanel() {
   var p = document.getElementById('fav-panel');
   p.classList.toggle('open');
   if (p.classList.contains('open')) renderFavs();
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function renderFavs() {
   var list = document.getElementById('fav-list');
@@ -1107,9 +1134,6 @@ function renderFavs() {
     '</div>';
   });
   list.innerHTML = html;
-}
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 /* ── selection tooltip ── */
@@ -1176,6 +1200,7 @@ function importFavs(file) {
       var existing = getFavs();
       var merged = existing.concat(imported);
       saveFavs(merged);
+      firestoreSet(merged);
       renderFavs();
       alert('Imported ' + imported.length + ' favorites. Total: ' + merged.length);
     } catch(err) {
@@ -2171,8 +2196,32 @@ function loadImportedBooks() {
   });
 }
 
+/* ── load favorites from Firestore ── */
+function loadFavsFromFirestore() {
+  db.collection('favorites').doc('all').get().then(function(doc) {
+    if (doc.exists && doc.data().items) {
+      var remote = doc.data().items;
+      var local = [];
+      try { local = JSON.parse(localStorage.getItem('bs-favs') || '[]'); } catch(e) {}
+      // merge: remote wins, keep local that aren't in remote
+      var remoteIds = {};
+      remote.forEach(function(f) { remoteIds[f.id] = true; });
+      var merged = remote.slice();
+      local.forEach(function(f) { if (!remoteIds[f.id]) merged.push(f); });
+      saveFavs(merged);
+      renderFavs();
+    }
+    favsLoaded = true;
+  }).catch(function(err) {
+    console.warn('Firestore read failed, using local cache:', err);
+    favsLoaded = true;
+    try { saveFavs(JSON.parse(localStorage.getItem('bs-favs') || '[]')); } catch(e) {}
+  });
+}
+
 /* ── init ── */
 loadImportedBooks();
+setTimeout(loadFavsFromFirestore, 1000);
 
 /* ── PWA install ── */
 if ('serviceWorker' in navigator) {
