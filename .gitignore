@@ -1,0 +1,12 @@
+# Temp / working files
+*.txt
+*.pdf
+*.docx
+*.py
+ar-*.txt
+*-en.txt
+*-complete.txt
+.anchored-summary-v2.md
+data.js
+lessons_data.json
+__test.js
